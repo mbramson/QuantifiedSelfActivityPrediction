@@ -1,0 +1,101 @@
+---
+title: "QuantifiedSelfAnalysis"
+author: "Mathew Bramson"
+date: "September 26, 2015"
+output: html_document
+---
+
+## Executive Summary
+
+In this analysis we will examine a dataset of biometric data from sensors attached to individuals doing 5 different activities. We will build a predictive model using machine learning that attempts to best predict what type of activity an individual is currently performing based on the collect biometric data.
+
+## Loading and Pre-Processing
+
+```{r}
+library(AppliedPredictiveModeling)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(randomForest)
+set.seed(5555)
+```
+
+Load the training and testing data. We will do our validation on a partition of the training set, with a 60% - 40% split.
+
+```{r}
+training <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+test <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+isTrain <- createDataPartition(y=training$classe, p=0.6, list=FALSE)
+train <- training[isTrain,]
+validate <- training[-isTrain,]
+dim(train)
+dim(validate)
+```
+
+## Data Preparation
+
+Try to eliminate variables that aren't likely to contribute to our model.
+
+First, eliminate any variables with near-zero variance.
+
+```{r}
+nearZeroVariance <- nearZeroVar(train)
+train <- train[, -nearZeroVariance]
+validate <- validate[, -nearZeroVariance]
+```
+
+Next, eliminate any variables where a majority (>90%) of their rows are missing.
+
+```{r}
+tooManyNAs <- sapply(train, function(x) mean(is.na(x))) > 0.90
+train <- train[, tooManyNAs==F]
+validate <- validate[, tooManyNAs==F]
+```
+
+Finally, eliminate variables that clearly aren't going to be contributing useful information to the model, such as the ID and the various raw timestamps.
+
+```{r}
+train <- train[,-c(1,3,4,5)]
+validate <- validate[,-c(1,3,4,5)]
+```
+
+## Modeling
+
+A Random Forest model was selected to fit the data. Before fitting, we will use 5-fold cross-validation to select optimal parameters for the Random Forest Model,
+
+```{r Modeling}
+CVParameters <- trainControl(method="cv", number=5, verboseIter=F)
+rf_fit <- train(classe ~ ., data=train, method="rf", trControl=CVParameters)
+rf_fit$finalModel
+```
+
+## Model Evaluation
+
+We use our new model to make predictions on the validation dataset that we paritioned out earlier. This is to ensure that we haven't overfit during training.
+
+```{r}
+predictions <- predict(rf_fit, newdata=validate)
+confusionMatrix(validate$classe, predictions)
+```
+
+We get an out-of-sample accuracy of 99.7%, which is a great result!
+
+## Predictions on the Test Set
+
+Now we apply our model to the testing dataset for which we do not know the actual classes. We will save our results to individual files.
+
+```{r}
+predictions <- predict(rf_fit, newdata=test)
+predictions <- as.character(predictions)
+
+pml_write_files <- function(x) {
+  n <- length(x)
+  for(i in 1:n){
+    filename <- paste0("problem_id_", i, ".txt")
+    write.table(x[i], file=filename, quote=F, row.names=F, col.names=F)
+  }
+}
+
+pml_write_files(predictions)
+```
